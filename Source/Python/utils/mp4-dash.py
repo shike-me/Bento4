@@ -56,10 +56,7 @@ from mp4utils import (
     XmlDuration,
     PrintErrorAndExit,
     MakeNewDir,
-    BooleanFromString,
-    ReGroupEC3Sets,
-    DolbyDigitalWithMPEGDASHScheme,
-    DolbyAc4WithMPEGDASHScheme
+    BooleanFromString
 )
 
 # setup main options
@@ -503,7 +500,6 @@ def OutputDash(options, set_attributes, audio_sets, video_sets, subtitles_sets, 
     # process the audio tracks
     if audio_sets:
         period.append(xml.Comment(' Audio '))
-        audio_sets = ReGroupEC3Sets(audio_sets)
         for _, audio_tracks in list(audio_sets.items()):
             args = [period, 'AdaptationSet']
             kwargs = {'mimeType': AUDIO_MIMETYPE, 'startWithSAP': '1', 'segmentAlignment': 'true'}
@@ -543,20 +539,12 @@ def OutputDash(options, set_attributes, audio_sets, video_sets, subtitles_sets, 
                                                 codecs=audio_track.codec,
                                                 bandwidth=str(audio_track.bandwidth),
                                                 audioSamplingRate=str(audio_track.sample_rate))
-                if audio_track.codec == 'ec-3' or audio_track.codec == 'ac-3':
+                if audio_track.codec == 'ec-3':
                     audio_channel_config_value = ComputeDolbyDigitalPlusAudioChannelConfig(audio_track)
-                    (mpeg_scheme, audio_channel_config_value) = DolbyDigitalWithMPEGDASHScheme(audio_channel_config_value)
-                    if (mpeg_scheme):
-                        scheme_id_uri = ISO_IEC_23001_8_AUDIO_CHANNEL_CONFIGURATION_SCHEME_ID_URI
-                    else:
-                        scheme_id_uri = DOLBY_DIGITAL_AUDIO_CHANNEL_CONFIGURATION_SCHEME_ID_URI
+                    scheme_id_uri = DOLBY_DIGITAL_AUDIO_CHANNEL_CONFIGURATION_SCHEME_ID_URI
                 elif audio_track.codec.startswith('ac-4'):
                     audio_channel_config_value = ComputeDolbyAc4AudioChannelConfig(audio_track)
-                    (mpeg_scheme, audio_channel_config_value) = DolbyAc4WithMPEGDASHScheme(audio_channel_config_value)
-                    if (mpeg_scheme):
-                        scheme_id_uri = ISO_IEC_23001_8_AUDIO_CHANNEL_CONFIGURATION_SCHEME_ID_URI
-                    else:
-                        scheme_id_uri = DOLBY_AC4_AUDIO_CHANNEL_CONFIGURATION_SCHEME_ID_URI
+                    scheme_id_uri = DOLBY_AC4_AUDIO_CHANNEL_CONFIGURATION_SCHEME_ID_URI
                 else:
                     # detect the actual number of channels
                     sample_description = audio_track.info['sample_descriptions'][0]
@@ -569,22 +557,6 @@ def OutputDash(options, set_attributes, audio_sets, video_sets, subtitles_sets, 
                                'AudioChannelConfiguration',
                                schemeIdUri=scheme_id_uri,
                                value=audio_channel_config_value)
-                # DD+ Atmos SupplementalProperty
-                if audio_track.codec_family == 'ec-3' and audio_track.dolby_ddp_atmos == 'Yes':
-                    xml.SubElement(representation,
-                                   'SupplementalProperty',
-                                   schemeIdUri='tag:dolby.com,2018:dash:EC3_ExtensionType:2018',
-                                   value='JOC')
-                    xml.SubElement(representation,
-                                   'SupplementalProperty',
-                                   schemeIdUri='tag:dolby.com,2018:dash:EC3_ExtensionComplexityIndex:2018',
-                                   value=str(audio_track.complexity_index))
-                # AC-4 IMS SupplementalProperty
-                if audio_track.codec_family == 'ac-4' and audio_track.dolby_ac4_ims == 'Yes':
-                    xml.SubElement(representation,
-                                   'SupplementalProperty',
-                                   schemeIdUri='tag:dolby.com,2016:dash:virtualized_content:2016',
-                                   value='1')
 
                 if options.on_demand:
                     base_url = xml.SubElement(representation, 'BaseURL')
@@ -979,61 +951,45 @@ def OutputHls(options, set_attributes, audio_sets, video_sets, subtitles_sets, s
             iframes_playlist_name = options.hls_iframes_playlist_name
             iframes_playlist_path = media_subdir+'/'+iframes_playlist_name
 
-        supplemental_codec_string = ''
-        if hasattr(video_track, 'supplemental_codec'):
-            if hasattr(video_track, 'dv_brand'):
-                supplemental_codec_string = video_track.supplemental_codec+'/'+video_track.dv_brand
-            else:
-                supplemental_codec_string = video_track.supplemental_codec
-
         if audio_groups:
             # one entry per matching audio group
             for audio_group_name in audio_groups:
                 if '*' not in video_track.hls_group_match and audio_group_name not in video_track.hls_group_match:
                     continue
                 audio_codecs = ','.join(audio_groups[audio_group_name]['codecs'])
-                master_playlist_file.write('#EXT-X-STREAM-INF:{}AUDIO="{}",AVERAGE-BANDWIDTH={:.0f},BANDWIDTH={:.0f},VIDEO-RANGE={},CODECS="{}",RESOLUTION={:.0f}x{:.0f},FRAME-RATE={:.3f}\n'.format(
+                master_playlist_file.write('#EXT-X-STREAM-INF:{}AUDIO="{}",AVERAGE-BANDWIDTH={:.0f},BANDWIDTH={:.0f},CODECS="{}",RESOLUTION={:.0f}x{:.0f},FRAME-RATE={:.3f}\n'.format(
                                            subtitles_group,
                                            audio_group_name,
                                            video_track.average_segment_bitrate + audio_groups[audio_group_name]['average_segment_bitrate'],
                                            video_track.max_segment_bitrate + audio_groups[audio_group_name]['max_segment_bitrate'],
-                                           video_track.video_range,
                                            video_track.codec+','+audio_codecs,
                                            video_track.width,
                                            video_track.height,
                                            video_track.frame_rate))
-                if supplemental_codec_string != '':
-                    master_playlist_file.write(',SUPPLEMENTAL-CODECS="{}"\n'.format(supplemental_codec_string))
                 master_playlist_file.write(media_playlist_path+'\n')
         else:
             # no audio
-            master_playlist_file.write('#EXT-X-STREAM-INF:{}AVERAGE-BANDWIDTH={:.0f},BANDWIDTH={:.0f},VIDEO-RANGE={},CODECS="{}",RESOLUTION={:.0f}x{:.0f},FRAME-RATE={:.3f}'.format(
+            master_playlist_file.write('#EXT-X-STREAM-INF:{}AVERAGE-BANDWIDTH={:.0f},BANDWIDTH={:.0f},CODECS="{}",RESOLUTION={:.0f}x{:.0f},FRAME-RATE={:.3f}\n'.format(
                                        subtitles_group,
                                        video_track.average_segment_bitrate,
                                        video_track.max_segment_bitrate,
-                                       video_track.video_range,
                                        video_track.codec,
                                        video_track.width,
                                        video_track.height,
                                        video_track.frame_rate))
-            if supplemental_codec_string != '':
-                master_playlist_file.write(',SUPPLEMENTAL-CODECS="{}"\n'.format(supplemental_codec_string))
             master_playlist_file.write(media_playlist_path+'\n')
 
         OutputHlsTrack(options, video_track, all_audio_tracks + all_video_tracks, media_subdir, media_playlist_name, media_file_name)
         iframe_average_segment_bitrate,iframe_max_bitrate = OutputHlsIframeIndex(options, video_track, all_audio_tracks + all_video_tracks, media_subdir, iframes_playlist_name, media_file_name)
 
         # this will be written later
-        iframe_playlist_lines.append('#EXT-X-I-FRAME-STREAM-INF:AVERAGE-BANDWIDTH={:.0f},BANDWIDTH={:.0f},VIDEO-RANGE={},CODECS="{}",RESOLUTION={:.0f}x{:.0f},URI="{}"'.format(
+        iframe_playlist_lines.append('#EXT-X-I-FRAME-STREAM-INF:AVERAGE-BANDWIDTH={:.0f},BANDWIDTH={:.0f},CODECS="{}",RESOLUTION={:.0f}x{:.0f},URI="{}"\n'.format(
                                      iframe_average_segment_bitrate,
                                      iframe_max_bitrate,
-                                     video_track.video_range,
                                      video_track.codec,
                                      video_track.width,
                                      video_track.height,
                                      iframes_playlist_path))
-        if supplemental_codec_string != '':
-            iframe_playlist_lines.append(',SUPPLEMENTAL-CODECS="{}"\n'.format(supplemental_codec_string))
 
     master_playlist_file.write('\n# I-Frame Playlists\n')
     master_playlist_file.write(''.join(iframe_playlist_lines))
@@ -1083,13 +1039,11 @@ def OutputHls(options, set_attributes, audio_sets, video_sets, subtitles_sets, s
             default = audio_track.hls_default and not default_selected
             if default:
                 default_selected = True
-            language = subtitles_file.language
-            language_name = subtitles_file.language_name
             master_playlist_file.write('#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitles",NAME="{}",AUTOSELECT={},DEFAULT={},LANGUAGE="{}",URI="{}/{}"\n'.format(
                                        language_name,
                                        'YES' if subtitles_file.hls_autoselect else 'NO',
                                        'YES' if default else 'NO',
-                                       language,
+                                       subtitles_file.language,
                                        media_subdir,
                                        media_playlist_name))
             OutputHlsWebvttPlaylist(options, media_subdir, media_playlist_name, subtitles_file.media_name, presentation_duration)
@@ -2233,7 +2187,7 @@ def main():
     # output the Smooth Manifests
     if options.smooth:
         OutputSmooth(options, audio_tracks, video_tracks)
-
+z
     # output the Hippo Manifest
     if options.hippo:
         OutputHippo(options, audio_tracks, video_tracks)
