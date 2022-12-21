@@ -684,12 +684,12 @@ def ComputeHlsFairplayKeyLine(options):
     return 'URI="'+options.fairplay_key_uri+'",KEYFORMAT="com.apple.streamingkeydelivery",KEYFORMATVERSIONS="1"'
 
 #############################################
-def OutputHlsCommon(options, track, all_tracks, media_subdir, playlist_name, media_file_name):
+def OutputHlsCommon(options, track, all_tracks, media_subdir, media_playlist_name, media_file_name):
     hls_target_duration = math.ceil(max(track.segment_durations))
 
     output_dir = path.join(options.output_dir, media_subdir)
     os.makedirs(output_dir, exist_ok = True)
-    playlist_file = open(path.join(output_dir, playlist_name), 'w', newline='\r\n')
+    playlist_file = open(path.join(options.output_dir,media_playlist_name), 'w', newline='\r\n')
     playlist_file.write('#EXTM3U\n')
     playlist_file.write('# Created with Bento4 mp4-dash.py, VERSION=' + VERSION + '-' + SDK_REVISION+'\n')
     playlist_file.write('#\n')
@@ -699,7 +699,7 @@ def OutputHlsCommon(options, track, all_tracks, media_subdir, playlist_name, med
     playlist_file.write('#EXT-X-TARGETDURATION:{}\n'.format(hls_target_duration))
     playlist_file.write('#EXT-X-MEDIA-SEQUENCE:0\n')
     if options.split:
-        playlist_file.write('#EXT-X-MAP:URI="{}"\n'.format(SPLIT_INIT_SEGMENT_NAME))
+        playlist_file.write('#EXT-X-MAP:URI="{}/{}"\n'.format(media_subdir,SPLIT_INIT_SEGMENT_NAME))
     else:
         init_segment_size = track.parent.init_segment.position + track.parent.init_segment.size
         playlist_file.write('#EXT-X-MAP:URI="{}",BYTERANGE="{}@0"\n'.format(media_file_name, init_segment_size))
@@ -737,7 +737,7 @@ def OutputHlsTrack(options, track, all_tracks, media_subdir, media_playlist_name
             media_playlist_file.write('#EXT-X-BYTERANGE:{}@{}\n'.format(segment_size, segment_position))
             media_playlist_file.write(media_file_name)
         else:
-            media_playlist_file.write(segment_pattern % (i+1))
+            media_playlist_file.write(media_subdir+'/'+segment_pattern % (i+1))
         media_playlist_file.write('\n')
 
     media_playlist_file.write('#EXT-X-ENDLIST\n')
@@ -812,7 +812,7 @@ def OutputHlsIframeIndex(options, track, all_tracks, media_subdir, iframes_playl
             iframe_segment_duration = track.segment_durations[i]
             index_playlist_file.write('#EXTINF:{},\n'.format(iframe_segment_duration))
             index_playlist_file.write('#EXT-X-BYTERANGE:{}@0\n'.format(iframe_range_size))
-            index_playlist_file.write(fragment_basename+'\n')
+            index_playlist_file.write(media_subdir+"/"+fragment_basename+'\n')
 
             iframe_total_segment_size += iframe_size
             iframe_total_segment_duration += iframe_segment_duration
@@ -918,7 +918,7 @@ def OutputHls(options, set_attributes, audio_sets, video_sets, subtitles_sets, s
                                        'YES' if audio_track.hls_autoselect else 'NO',
                                        'YES' if default else 'NO',
                                        audio_track.channels,
-                                       media_playlist_path))
+                                       media_playlist_name))
             OutputHlsTrack(options, audio_track, all_audio_tracks + all_video_tracks, media_subdir, media_playlist_name, media_file_name)
 
             # Add an audio stream entry for audio-only presentations or if the track specifiers include a '-' entry
@@ -946,9 +946,9 @@ def OutputHls(options, set_attributes, audio_sets, video_sets, subtitles_sets, s
         else:
             media_subdir          = video_track.representation_id
             media_file_name       = ''
-            media_playlist_name   = options.hls_media_playlist_name
+            media_playlist_name   = '{:.0f}p.m3u8'.format(video_track.height)
             media_playlist_path   = media_subdir+'/'+media_playlist_name
-            iframes_playlist_name = options.hls_iframes_playlist_name
+            iframes_playlist_name = '{:.0f}p-iframes.m3u8'.format(video_track.height)
             iframes_playlist_path = media_subdir+'/'+iframes_playlist_name
 
         if audio_groups:
@@ -966,7 +966,8 @@ def OutputHls(options, set_attributes, audio_sets, video_sets, subtitles_sets, s
                                            video_track.width,
                                            video_track.height,
                                            video_track.frame_rate))
-                master_playlist_file.write(media_playlist_path+'\n')
+                master_playlist_file.write('{:.0f}p.m3u8\n'.format(
+                                           video_track.height))
         else:
             # no audio
             master_playlist_file.write('#EXT-X-STREAM-INF:{}AVERAGE-BANDWIDTH={:.0f},BANDWIDTH={:.0f},CODECS="{}",RESOLUTION={:.0f}x{:.0f},FRAME-RATE={:.3f}\n'.format(
@@ -989,7 +990,7 @@ def OutputHls(options, set_attributes, audio_sets, video_sets, subtitles_sets, s
                                      video_track.codec,
                                      video_track.width,
                                      video_track.height,
-                                     iframes_playlist_path))
+                                     iframes_playlist_name))
 
     master_playlist_file.write('\n# I-Frame Playlists\n')
     master_playlist_file.write(''.join(iframe_playlist_lines))
@@ -2187,7 +2188,7 @@ def main():
     # output the Smooth Manifests
     if options.smooth:
         OutputSmooth(options, audio_tracks, video_tracks)
-z
+
     # output the Hippo Manifest
     if options.hippo:
         OutputHippo(options, audio_tracks, video_tracks)
